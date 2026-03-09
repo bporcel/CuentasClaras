@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
 import { useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 
@@ -10,7 +10,10 @@ interface MoneyMapProps {
     label?: string;
 }
 
-const COLORS = ["#2563eb", "#3b82f6", "#60a5fa", "#818cf8", "#a78bfa", "#c084fc", "#e879f9", "#f472b6", "#fb923c", "#facc15"];
+// Recharts renders into SVG so CSS custom properties (var(--color-*)) are NOT resolved.
+// We must use concrete HEX values here.
+const BAR_COLORS = ["#2563eb", "#3b82f6", "#60a5fa", "#818cf8", "#a78bfa", "#c084fc", "#e879f9", "#f472b6", "#fb923c", "#facc15"];
+const BAR_SELECTED = "#1d4ed8";
 
 export function MoneyMap({ data, title = "Actividad por Organismo", label = "Licitaciones" }: MoneyMapProps) {
     const [selected, setSelected] = useState<string | null>(null);
@@ -57,46 +60,57 @@ export function MoneyMap({ data, title = "Actividad por Organismo", label = "Lic
                 </div>
             )}
 
-            <div className="flex-1 min-h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                        data={sortedData}
-                        layout="vertical"
-                        margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
-                    >
-                        <XAxis type="number" hide />
-                        <YAxis
-                            type="category"
-                            dataKey="name"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
-                            width={150}
-                            tickFormatter={(v: string) => v.length > 28 ? v.slice(0, 26) + "…" : v}
-                        />
-
-                        <Bar
-                            dataKey="value"
-                            radius={[0, 6, 6, 0]}
-                            barSize={26}
-                            style={{ cursor: "pointer" }}
-                            onClick={(data: any) => {
-                                const name = data?.name;
-                                if (name) setSelected((prev: string | null) => prev === name ? null : name);
-                            }}
+            {data.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center text-muted-foreground bg-muted/20 rounded-xl border border-dashed border-border p-6 h-[300px]">
+                    No se han detectado adjudicaciones por organismo en el periodo seleccionado.
+                </div>
+            ) : (
+                <div className="flex-1 min-h-[300px] -ml-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                            data={sortedData}
+                            layout="vertical"
+                            margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
                         >
-                            {sortedData.map((entry, index) => (
-                                <Cell
-                                    key={`cell-${index}`}
-                                    fill={COLORS[index % COLORS.length]}
-                                    opacity={selected && selected !== entry.name ? 0.35 : 1}
-                                    style={{ cursor: "pointer", transition: "opacity 0.2s" }}
-                                />
-                            ))}
-                        </Bar>
-                    </BarChart>
-                </ResponsiveContainer>
-            </div>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-border)" />
+
+                            <XAxis
+                                type="number"
+                                hide
+                            />
+                            <YAxis
+                                type="category"
+                                dataKey="name"
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
+                                width={150}
+                                tickFormatter={(v: string) => v.length > 28 ? v.slice(0, 26) + "…" : v}
+                            />
+
+                            <Bar
+                                dataKey="value"
+                                radius={[0, 6, 6, 0]}
+                                barSize={26}
+                                style={{ cursor: "pointer" }}
+                                onClick={(data: { name?: string }) => {
+                                    const name = data?.name;
+                                    if (name) setSelected((prev: string | null) => prev === name ? null : name);
+                                }}
+                            >
+                                {sortedData.map((entry, index) => (
+                                    <Cell
+                                        key={`cell-${index}`}
+                                        fill={selected === entry.name ? BAR_SELECTED : BAR_COLORS[index % BAR_COLORS.length]}
+                                        fillOpacity={selected === null || selected === entry.name ? 1 : 0.3}
+                                        style={{ cursor: "pointer", transition: "opacity 0.2s" }}
+                                    />
+                                ))}
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
 
             {sortedData.length > 0 && !selected && (
                 <p className="text-[10px] text-muted-foreground text-center mt-2">

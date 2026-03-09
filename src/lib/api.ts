@@ -22,6 +22,8 @@ export interface RealBOEItem {
     recipientCif?: string;
     /** Contract value in EUR – only present on formalización items */
     amount?: number;
+    /** Type of procedure used (e.g. "Abierto", "Negociado sin publicidad") */
+    procedure?: string;
 }
 
 export interface AggregatedData {
@@ -36,11 +38,17 @@ export interface AggregatedData {
     topCompanies: { name: string; cif: string; amount: number; count: number; sampleUrl: string }[];
     /** Daily trend – value = total euros awarded that day */
     monthlyTrend: { name: string; value: number; fullDate: string }[];
+    /** Breakdown of contract volume by procedure type */
+    procedureDistribution: { name: string; value: number }[];
+    /** Organisms that use "Negociado sin publicidad" or "Emergencia" the most */
+    topMinistriesWithoutPublicity: { name: string; value: number; sampleUrl: string }[];
+    /** Warnings for companies receiving multiple minor contracts ("troceado") */
+    minorContractWarnings: { name: string; cif: string; count: number; totalAmount: number; ministries: string[]; sampleUrl: string }[];
     latestRealOperations: RealBOEItem[];
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes – historical BOE docs change rarely
 let cachedResult: { data: AggregatedData; timestamp: number } | null = null;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -64,6 +72,16 @@ function parseSpanishAmount(raw: string): number | undefined {
 
 // ── Summary fetcher ───────────────────────────────────────────────────────────
 
+interface BOEDepartamento {
+    nombre?: string;
+    item?: unknown | unknown[]; // keeping item as unknown to avoid over-typing the whole BOE spec
+}
+
+interface BOESeccion {
+    codigo?: string;
+    departamento?: BOEDepartamento | BOEDepartamento[];
+}
+
 async function fetchSumarioItems(dateStr: string): Promise<Omit<RealBOEItem, "recipient" | "recipientCif" | "amount">[]> {
     try {
         const res = await fetch(
@@ -77,14 +95,14 @@ async function fetchSumarioItems(dateStr: string): Promise<Omit<RealBOEItem, "re
         const diarioArr = json?.data?.sumario?.diario;
         if (!diarioArr || !diarioArr.length) return [];
 
-        const secciones: any[] = Array.isArray(diarioArr[0].seccion)
+        const secciones: BOESeccion[] = Array.isArray(diarioArr[0].seccion)
             ? diarioArr[0].seccion
             : diarioArr[0].seccion ? [diarioArr[0].seccion] : [];
 
-        const sec5a = secciones.find((s: any) => s.codigo === "5A");
+        const sec5a = secciones.find((s) => s.codigo === "5A");
         if (!sec5a) return [];
 
-        const departments: any[] = Array.isArray(sec5a.departamento)
+        const departments: BOEDepartamento[] = Array.isArray(sec5a.departamento)
             ? sec5a.departamento
             : sec5a.departamento ? [sec5a.departamento] : [];
 
@@ -93,7 +111,7 @@ async function fetchSumarioItems(dateStr: string): Promise<Omit<RealBOEItem, "re
 
         for (const dept of departments) {
             const rawItems = dept.item;
-            const items: any[] = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
+            const items = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
             for (const item of items) {
                 const title: string = item.titulo ?? "";
                 const lowerTitle = title.toLowerCase();
@@ -139,12 +157,21 @@ async function enrichFormalizacion(item: Omit<RealBOEItem, "recipient" | "recipi
         const cifMatch = xml.match(/<dt>12\.2\)[^<]*<\/dt>\s*<dd>([^<]+)<\/dd>/);
         // Field 13.1 = awarded value
         const amountMatch = xml.match(/<dt>13\.1\)[^<]*<\/dt>\s*<dd>([^<]+)<\/dd>/);
+        // Field 7 = Tipo de procedimiento de adjudicación
+        const procedureMatch = xml.match(/<dt>[^<]*procedimiento[^<]*<\/dt>\s*<dd>([^<]+)<\/dd>/i);
+
+        let procedure = procedureMatch ? procedureMatch[1].trim() : undefined;
+        // Clean up procedure strings (e.g. "Abierto." -> "Abierto")
+        if (procedure && procedure.endsWith(".")) {
+            procedure = procedure.slice(0, -1);
+        }
 
         return {
             ...item,
             recipient: recipientMatch ? recipientMatch[1].trim().replace(/\.$/, "") : undefined,
             recipientCif: cifMatch ? cifMatch[1].trim().replace(/\.$/, "") : undefined,
             amount: amountMatch ? parseSpanishAmount(amountMatch[1]) : undefined,
+            procedure,
         };
     } catch {
         return item;
@@ -159,18 +186,25 @@ export async function getAggregatedData(): Promise<AggregatedData> {
         return cachedResult.data;
     }
 
-    console.log("[Production API] Refreshing BOE data (last 14 days)…");
+    console.log("[Production API] Refreshing BOE data (last 60 days)…");
 
-    // 1. Fetch summaries for last 14 calendar days in parallel
+    // 1. Fetch summaries for last 60 calendar days in parallel
     const rawItems = (
-        await Promise.all(Array.from({ length: 14 }, (_, i) => fetchSumarioItems(toDateStr(i))))
+        await Promise.all(Array.from({ length: 60 }, (_, i) => fetchSumarioItems(toDateStr(i))))
     ).flat();
 
-    // 2. Enrich formalización items with real amounts (limit to 60 to stay fast)
-    const formalizaciones = rawItems.filter(i => i.kind === "formalizacion").slice(0, 60);
+    // 2. Enrich formalización items (up to 200) in batches of 20 to avoid saturating BOE
+    const ENRICH_CAP = 200;
+    const BATCH_SIZE = 20;
+    const formalizaciones = rawItems.filter(i => i.kind === "formalizacion").slice(0, ENRICH_CAP);
     const others = rawItems.filter(i => i.kind !== "formalizacion");
 
-    const enriched = await Promise.all(formalizaciones.map(enrichFormalizacion));
+    const enriched: RealBOEItem[] = [];
+    for (let i = 0; i < formalizaciones.length; i += BATCH_SIZE) {
+        const batch = formalizaciones.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(batch.map(enrichFormalizacion));
+        enriched.push(...results);
+    }
     const allItems: RealBOEItem[] = [...enriched, ...others];
 
     // ── Aggregate stats ────────────────────────────────────────────────────────
@@ -201,25 +235,102 @@ export async function getAggregatedData(): Promise<AggregatedData> {
         .sort((a, b) => b.value - a.value)
         .slice(0, 10);
 
-    // Daily trend – euros awarded per day (fallback: count if no euros that day)
+    // Daily trend – euros awarded per day (strictly EUR, no mixed metrics)
     const dailyEuros: Record<string, number> = {};
     for (const item of enriched) {
-        if (item.amount) dailyEuros[item.date] = (dailyEuros[item.date] ?? 0) + (item.amount ?? 0);
+        if (item.amount) dailyEuros[item.date] = (dailyEuros[item.date] ?? 0) + item.amount;
     }
-    // Fill days that have announcements but no award amounts with announcement count
-    const dailyCount: Record<string, number> = {};
-    for (const item of allItems) dailyCount[item.date] = (dailyCount[item.date] ?? 0) + 1;
 
-    const trendDates = Array.from(new Set([...Object.keys(dailyEuros), ...Object.keys(dailyCount)])).sort();
-    const monthlyTrend = trendDates.map(date => ({
-        fullDate: date,
-        name: date.split("-").slice(1).reverse().join("/"),
-        value: dailyEuros[date] ?? 0,
-    }));
+    // Generate strict contiguous calendar days
+    // We only show from the oldest date we actually have enriched data for (to avoid a long flat zero-line at the start)
+    const oldestDate = enriched.length > 0
+        ? enriched.reduce((min, p) => p.date < min ? p.date : min, enriched[0].date)
+        : toDateStr(59); // Fallback to 60 days if empty
 
-    const minorContracts = allItems.filter(i =>
-        i.title.toLowerCase().includes("menor")
-    ).length;
+    const monthlyTrend = Array.from({ length: 60 }, (_, i) => {
+        const dateStr = toDateStr(59 - i); // oldest to newest
+        const isoDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+        return {
+            fullDate: isoDate,
+            name: `${dateStr.slice(6, 8)}/${dateStr.slice(4, 6)}`,
+            value: dailyEuros[isoDate] ?? 0,
+        };
+    }).filter(d => d.fullDate >= oldestDate);
+
+    // Track minor contracts and potential fragmentation
+    let minorContracts = 0;
+    const minorContractMap: Record<string, { name: string; cif: string; count: number; totalAmount: number; ministries: Set<string>; sampleUrl: string }> = {};
+
+    for (const item of enriched) {
+        const proc = item.procedure?.toLowerCase() || "";
+        const title = item.title.toLowerCase();
+        const amt = item.amount || 0;
+
+        const isMenor = proc.includes("menor") || title.includes("menor") || (amt > 0 && amt <= 15000);
+
+        if (isMenor) {
+            minorContracts++;
+            if (item.recipient) {
+                if (!minorContractMap[item.recipient]) {
+                    minorContractMap[item.recipient] = { name: item.recipient, cif: item.recipientCif || "---", count: 0, totalAmount: 0, ministries: new Set(), sampleUrl: item.url };
+                }
+                minorContractMap[item.recipient].count++;
+                minorContractMap[item.recipient].totalAmount += amt;
+                minorContractMap[item.recipient].ministries.add(item.department);
+            }
+        }
+    }
+
+    // Convert to array and filter for multiple minor contracts
+    const minorContractWarnings = Object.values(minorContractMap)
+        .filter(c => c.count > 1)
+        .sort((a, b) => b.count - a.count || b.totalAmount - a.totalAmount)
+        .map(c => ({ ...c, ministries: Array.from(c.ministries) }))
+        .slice(0, 10);
+
+    // Track Procedure distribution
+    const procedureCount: Record<string, number> = {};
+    const noPublicityByDept: Record<string, { count: number; sampleUrl: string }> = {};
+
+    for (const item of enriched) {
+        if (!item.procedure) continue;
+        const procName = item.procedure;
+
+        // Group similar procedures
+        let groupName = "Otros";
+        const lowerProc = procName.toLowerCase();
+
+        if (lowerProc.includes("abierto simplificado")) groupName = "Abierto Simplificado";
+        else if (lowerProc.includes("abierto")) groupName = "Abierto";
+        else if (lowerProc.includes("negociado sin publicidad")) groupName = "Negociado Sin Publicidad";
+        else if (lowerProc.includes("negociado con publicidad")) groupName = "Negociado Con Publicidad";
+        else if (lowerProc.includes("emergencia")) groupName = "Emergencia";
+        else if (lowerProc.includes("basado en un acuerdo marco")) groupName = "Acuerdo Marco";
+        else if (lowerProc.includes("restringido")) groupName = "Restringido";
+        else groupName = "Otros";
+
+        procedureCount[groupName] = (procedureCount[groupName] ?? 0) + 1;
+
+        if (groupName === "Negociado Sin Publicidad" || groupName === "Emergencia") {
+            if (!noPublicityByDept[item.department]) {
+                noPublicityByDept[item.department] = { count: 0, sampleUrl: item.url };
+            }
+            noPublicityByDept[item.department].count++;
+        }
+    }
+
+    const procedureDistribution = Object.entries(procedureCount)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value);
+
+    const topMinistriesWithoutPublicity = Object.entries(noPublicityByDept)
+        .map(([name, entry]) => ({
+            name,
+            value: entry.count,
+            sampleUrl: entry.sampleUrl,
+        }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
 
     const data: AggregatedData = {
         totalAmount: allItems.length,
@@ -229,6 +340,9 @@ export async function getAggregatedData(): Promise<AggregatedData> {
         byRegion,
         topCompanies,
         monthlyTrend,
+        procedureDistribution,
+        topMinistriesWithoutPublicity,
+        minorContractWarnings,
         latestRealOperations: allItems.slice(0, 30),
     };
 

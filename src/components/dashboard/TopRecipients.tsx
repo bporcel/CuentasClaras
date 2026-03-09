@@ -32,8 +32,8 @@ export function TopRecipients({
                     <Trophy className="w-5 h-5 text-yellow-500" />
                     {title}
                 </h3>
-                <span className="text-xs font-medium bg-muted text-muted-foreground px-2 py-1 rounded-full">
-                    Últimos 14 días
+                <span className="text-[10px] uppercase tracking-wider font-bold bg-muted text-muted-foreground px-2 py-1 rounded-md border border-border">
+                    Análisis: 200 contratos recientes
                 </span>
             </div>
 

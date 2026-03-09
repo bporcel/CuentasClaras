@@ -4,6 +4,8 @@ import { MoneyMap } from "@/components/dashboard/MoneyMap";
 import { TrendChart } from "@/components/dashboard/TrendChart";
 import { TopRecipients } from "@/components/dashboard/TopRecipients";
 import { LatestActivity } from "@/components/dashboard/LatestActivity";
+import { ProcedureRanking } from "@/components/dashboard/ProcedureRanking";
+import { FragmentationWarnings } from "@/components/dashboard/FragmentationWarnings";
 import { Activity, Landmark, Euro } from "lucide-react";
 
 export const revalidate = 60;
@@ -20,6 +22,9 @@ export default async function Home() {
     monthlyTrend,
     latestRealOperations,
     minorContracts,
+    procedureDistribution,
+    topMinistriesWithoutPublicity,
+    minorContractWarnings,
   } = await getAggregatedData();
 
   return (
@@ -44,36 +49,36 @@ export default async function Home() {
         <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
             <Euro className="w-5 h-5 text-emerald-500" />
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Contratos Adjudicados (14 días)
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md border border-emerald-100 mb-1">
+              Dinero Rastreado (Top 200)
             </span>
           </div>
           <span className="text-4xl font-black tracking-tight">
             {totalEuros > 0 ? formatEur(totalEuros) : "–"}
           </span>
           <span className="text-sm text-muted-foreground mt-1">
-            Valor total de contratos formalizados extraídos del BOE
+            Suma del valor adjudicado en los 200 anuncios analizados
           </span>
         </div>
 
         <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
             <Activity className="w-5 h-5 text-blue-500" />
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Anuncios de Contratación
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-md border border-blue-100 mb-1">
+              Volumen de Publicaciones
             </span>
           </div>
           <span className="text-4xl font-black tracking-tight">{totalAmount}</span>
           <span className="text-sm text-muted-foreground mt-1">
-            Publicaciones en BOE en los últimos 14 días
+            Total de publicaciones detectadas en los últimos 60 días
           </span>
         </div>
 
         <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
             <Landmark className="w-5 h-5 text-rose-500" />
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Contratos Menores{" "}
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-rose-50 text-rose-700 px-2 py-1 rounded-md border border-rose-100 mb-1 leading-none inline-flex items-center gap-1">
+              Troceado / Menores (Top 200)
             </span>
             <Tooltip icon content="Adjudicaciones directas sin concurso público, normalmente por importe inferior a 15.000 €.">
               {""}
@@ -81,7 +86,7 @@ export default async function Home() {
           </div>
           <span className="text-4xl font-black tracking-tight">{minorContracts}</span>
           <span className="text-sm text-muted-foreground mt-1">
-            Detectados por palabras clave en el BOE
+            Adjudicaciones directas detectadas en los últimos analizados
           </span>
         </div>
       </section>
@@ -97,6 +102,19 @@ export default async function Home() {
         </div>
         <div className="col-span-1 h-[400px] rounded-2xl bg-card border border-border shadow-sm p-6 flex flex-col overflow-hidden hover:shadow-md transition-shadow">
           <LatestActivity operations={latestRealOperations} />
+        </div>
+      </section>
+
+      {/* Transparency / Procedure Focus */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 bg-card border border-border shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow">
+          <ProcedureRanking
+            data={procedureDistribution}
+            topNoPublicity={topMinistriesWithoutPublicity}
+          />
+        </div>
+        <div className="lg:col-span-1 h-[450px] bg-card border border-border shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow">
+          <FragmentationWarnings warnings={minorContractWarnings} />
         </div>
       </section>
 
