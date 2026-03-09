@@ -8,6 +8,8 @@
  *     → formalización items contain: awarded company, CIF, amount, procedure type
  */
 
+import { fetchPlacspLicitaciones } from "./placsp";
+
 export interface RealBOEItem {
     id: string;
     title: string;
@@ -45,6 +47,10 @@ export interface AggregatedData {
     /** Warnings for companies receiving multiple minor contracts ("troceado") */
     minorContractWarnings: { name: string; cif: string; count: number; totalAmount: number; ministries: string[]; sampleUrl: string }[];
     latestRealOperations: RealBOEItem[];
+    // --- PLACSP INTEGRATION ---
+    placspOvercostsValue: number;
+    placspOvercostsCount: number;
+    topPlacspOvercosts: { title: string; party: string; expected: number; awarded: number; delta: number; link: string }[];
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
@@ -332,6 +338,32 @@ export async function getAggregatedData(): Promise<AggregatedData> {
         .sort((a, b) => b.value - a.value)
         .slice(0, 5);
 
+    // --- PLACSP INGESTION (Sobrecostes) ---
+    const placspData = await fetchPlacspLicitaciones();
+    let placspOvercostsValue = 0;
+    let placspOvercostsCount = 0;
+    const overcostItems: { title: string; party: string; expected: number; awarded: number; delta: number; link: string }[] = [];
+
+    for (const tender of placspData) {
+        if (tender.amountAwarded > 0 && tender.amountTendered > 0 && tender.amountAwarded > tender.amountTendered) {
+            const delta = tender.amountAwarded - tender.amountTendered;
+            placspOvercostsValue += delta;
+            placspOvercostsCount++;
+            overcostItems.push({
+                title: tender.title,
+                party: tender.contractingParty,
+                expected: tender.amountTendered,
+                awarded: tender.amountAwarded,
+                delta,
+                link: tender.link
+            });
+        }
+    }
+
+    // Sort by largest absolute overcost
+    overcostItems.sort((a, b) => b.delta - a.delta);
+    const topPlacspOvercosts = overcostItems.slice(0, 5);
+
     const data: AggregatedData = {
         totalAmount: allItems.length,
         totalEuros,
@@ -344,6 +376,9 @@ export async function getAggregatedData(): Promise<AggregatedData> {
         topMinistriesWithoutPublicity,
         minorContractWarnings,
         latestRealOperations: allItems.slice(0, 30),
+        placspOvercostsValue,
+        placspOvercostsCount,
+        topPlacspOvercosts
     };
 
     cachedResult = { data, timestamp: now };

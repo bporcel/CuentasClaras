@@ -6,7 +6,8 @@ import { TopRecipients } from "@/components/dashboard/TopRecipients";
 import { LatestActivity } from "@/components/dashboard/LatestActivity";
 import { ProcedureRanking } from "@/components/dashboard/ProcedureRanking";
 import { FragmentationWarnings } from "@/components/dashboard/FragmentationWarnings";
-import { Activity, Landmark, Euro } from "lucide-react";
+import { PlacspOvercosts } from "@/components/dashboard/PlacspOvercosts";
+import { Activity, Euro, TrendingUp } from "lucide-react";
 
 export const revalidate = 60;
 
@@ -21,10 +22,12 @@ export default async function Home() {
     topCompanies,
     monthlyTrend,
     latestRealOperations,
-    minorContracts,
     procedureDistribution,
     topMinistriesWithoutPublicity,
     minorContractWarnings,
+    topPlacspOvercosts,
+    placspOvercostsValue,
+    placspOvercostsCount,
   } = await getAggregatedData();
 
   return (
@@ -33,65 +36,79 @@ export default async function Home() {
       <section className="flex flex-col gap-2">
         <h1 className="text-4xl font-bold tracking-tight">Movimientos de Dinero Público</h1>
         <p className="text-muted-foreground text-lg max-w-3xl">
-          Supervisa adónde van tus impuestos. Todos los datos provienen directamente de la API oficial del{" "}
+          Supervisa adónde van tus impuestos. Datos directos del{" "}
           <Tooltip
-            content="Boletín Oficial del Estado: el diario donde el Gobierno publica todas sus leyes, contratos y ayudas públicas."
+            content="Boletín Oficial del Estado: el diario oficial donde el Gobierno publica todos sus contratos y adjudicaciones."
             className="text-primary font-medium border-b border-primary/30 hover:border-primary border-dashed cursor-help transition-colors"
           >
             BOE
           </Tooltip>{" "}
-          — sin intermediarios ni datos simulados.
+          y de la{" "}
+          <Tooltip
+            content="Plataforma de Contratación del Sector Público: el registro oficial de licitaciones y presupuestos estimados de cada contrato."
+            className="text-primary font-medium border-b border-primary/30 hover:border-primary border-dashed cursor-help transition-colors"
+          >
+            PLACSP
+          </Tooltip>
+          {" "}— sin intermediarios ni datos estimados.
         </p>
       </section>
 
       {/* KPI Cards */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        {/* Total rastreado (BOE) */}
         <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
             <Euro className="w-5 h-5 text-emerald-500" />
-            <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md border border-emerald-100 mb-1">
-              Dinero Rastreado (Top 200)
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md border border-emerald-100">
+              Dinero Rastreado · BOE
             </span>
           </div>
           <span className="text-4xl font-black tracking-tight">
             {totalEuros > 0 ? formatEur(totalEuros) : "–"}
           </span>
           <span className="text-sm text-muted-foreground mt-1">
-            Suma del valor adjudicado en los 200 anuncios analizados
+            Valor total adjudicado en los últimos 200 contratos formalizados en el BOE
           </span>
         </div>
 
+        {/* Publicaciones */}
         <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
             <Activity className="w-5 h-5 text-blue-500" />
-            <span className="text-[10px] uppercase tracking-wider font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-md border border-blue-100 mb-1">
-              Volumen de Publicaciones
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-md border border-blue-100">
+              Publicaciones · 60 días
             </span>
           </div>
           <span className="text-4xl font-black tracking-tight">{totalAmount}</span>
           <span className="text-sm text-muted-foreground mt-1">
-            Total de publicaciones detectadas en los últimos 60 días
+            Anuncios de contratación publicados en el BOE en los últimos 60 días
           </span>
         </div>
 
-        <div className="p-6 rounded-2xl bg-card border border-border shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
+        {/* Sobrecostes PLACSP */}
+        <div className="p-6 rounded-2xl bg-card border border-rose-200 shadow-sm flex flex-col gap-1 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-2 mb-2">
-            <Landmark className="w-5 h-5 text-rose-500" />
-            <span className="text-[10px] uppercase tracking-wider font-bold bg-rose-50 text-rose-700 px-2 py-1 rounded-md border border-rose-100 mb-1 leading-none inline-flex items-center gap-1">
-              Troceado / Menores (Top 200)
+            <TrendingUp className="w-5 h-5 text-rose-500" />
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-rose-50 text-rose-700 px-2 py-1 rounded-md border border-rose-100">
+              Pagado de Más · PLACSP
             </span>
-            <Tooltip icon content="Adjudicaciones directas sin concurso público, normalmente por importe inferior a 15.000 €.">
+            <Tooltip icon content="Diferencia entre el precio estimado al licitar y el precio final pagado. Suma de los contratos recientes de la Plataforma de Contratación del Estado donde el coste final superó el presupuesto base.">
               {""}
             </Tooltip>
           </div>
-          <span className="text-4xl font-black tracking-tight">{minorContracts}</span>
+          <span className="text-4xl font-black tracking-tight text-rose-600">
+            {placspOvercostsValue > 0 ? formatEur(placspOvercostsValue) : "–"}
+          </span>
           <span className="text-sm text-muted-foreground mt-1">
-            Adjudicaciones directas detectadas en los últimos analizados
+            Extra pagado sobre el presupuesto inicial en {placspOvercostsCount} contratos recientes
           </span>
         </div>
+
       </section>
 
-      {/* Charts */}
+      {/* Charts: tendencia + actividad reciente */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="col-span-1 lg:col-span-2 h-[400px] rounded-2xl bg-card border border-border shadow-sm p-6 flex flex-col overflow-hidden hover:shadow-md transition-shadow">
           <TrendChart
@@ -105,7 +122,20 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Transparency / Procedure Focus */}
+      {/* Sobrecostes PLACSP – sección con contexto claro */}
+      <section>
+        <div className="mb-4">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            🔍 ¿Se ha pagado de más en algún contrato?
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            Cuando el Estado saca un contrato a concurso, publica un <strong>presupuesto estimado</strong>. Aquí mostramos los contratos donde el precio final adjudicado superó esa estimación inicial. Datos de la Plataforma de Contratación del Sector Público (PLACSP).
+          </p>
+        </div>
+        <PlacspOvercosts data={topPlacspOvercosts} />
+      </section>
+
+      {/* Tipo de procedimiento + alertas de fragmentación */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-card border border-border shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow">
           <ProcedureRanking
@@ -118,7 +148,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Secondary charts */}
+      {/* Mapa de organismos + mayores adjudicatarios */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="h-[450px] rounded-2xl bg-card border border-border shadow-sm p-6 flex flex-col overflow-hidden hover:shadow-md transition-shadow">
           <MoneyMap
@@ -136,17 +166,16 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Live data badge */}
+      {/* Fuentes de datos */}
       <section className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl text-emerald-900">
         <div className="flex items-start gap-4">
           <span className="text-2xl mt-0.5">📡</span>
           <div>
-            <h3 className="font-bold mb-1">Datos 100 % en tiempo real</h3>
+            <h3 className="font-bold mb-1">Datos 100% de fuentes oficiales del Estado</h3>
             <p className="text-sm leading-relaxed opacity-90">
-              Los valores monetarios se extraen directamente del XML oficial de cada anuncio de formalización publicado en el BOE.
-              El importe adjudicado, el nombre de la empresa y su CIF proceden del campo 13.1/{" "}
-              12.1 / 12.2 del estándar europeo de contratación.
-              <strong> No hay bases de datos intermedias ni cifras estimadas.</strong>
+              Los contratos y adjudicaciones se obtienen del <strong>BOE (Boletín Oficial del Estado)</strong>.
+              Los presupuestos estimados y el cálculo de sobrecostes se obtienen de la <strong>PLACSP (Plataforma de Contratación del Sector Público)</strong>.
+              Ambas son fuentes oficiales del Gobierno de España. No hay bases de datos intermedias ni cifras estimadas por nosotros.
             </p>
           </div>
         </div>
